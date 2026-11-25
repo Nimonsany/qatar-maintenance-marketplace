@@ -1,0 +1,42 @@
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local backups and archives
+*.zip
+*.tar
+*.tar.gz
+*.bak
+*.backup
+*.sql
+*.dump
+
+# Temporary files
+*.tmp
+*.log
+*~
+.DS_Store
+
+# Python
+__pycache__/
+.venv/
+
+# Node.js / Next.js
+node_modules/
+.next/
+dist/
+build/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins*
+.packages
+
+# IDE
+.idea/
+.vscode/
