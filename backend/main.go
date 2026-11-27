@@ -3,38 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"qatar-maintenance/backend/internal/config"
 	"qatar-maintenance/backend/internal/logging"
 	serverpkg "qatar-maintenance/backend/internal/server"
-	"strconv"
 	"syscall"
-	"time"
 )
 
 type healthResponse struct {
 	Status  string `json:"status"`
 	Service string `json:"service"`
-}
-
-// loadPort validates the optional local development port.
-func loadPort(value string) (int, error) {
-	if value == "" {
-		return 8080, nil
-	}
-
-	port, err := strconv.Atoi(value)
-	if err != nil || port < 1024 || port > 65535 {
-		return 0, fmt.Errorf(
-			"invalid QMM_PORT: expected integer from 1024 to 65535",
-		)
-	}
-
-	return port, nil
 }
 
 // newHandler builds the API router with request middleware.
@@ -96,32 +79,35 @@ func newHandler() http.Handler {
 	return requestMiddleware(mux)
 }
 
-func newServer(port int) *http.Server {
-	return &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", port),
-		Handler:           newHandler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       30 * time.Second,
+func buildApplication(
+	lookup config.LookupEnv,
+	logOutput io.Writer,
+) (config.Config, *http.Server, *slog.Logger, error) {
+	cfg, err := config.Load(lookup)
+	if err != nil {
+		return config.Config{}, nil, nil, err
 	}
+
+	logger, err := logging.New(logOutput, cfg.LogLevel)
+	if err != nil {
+		return config.Config{}, nil, nil, err
+	}
+
+	srv, err := serverpkg.New(cfg, newHandler())
+	if err != nil {
+		return config.Config{}, nil, nil, err
+	}
+
+	return cfg, srv, logger, nil
 }
 
 func main() {
-	cfg, err := config.Load(os.LookupEnv)
+	cfg, server, logger, err := buildApplication(
+		os.LookupEnv,
+		os.Stderr,
+	)
 	if err != nil {
 		log.Fatal(err)
-	}
-
-	logger, err := logging.New(os.Stderr, cfg.LogLevel)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	server, err := serverpkg.New(cfg, newHandler())
-	if err != nil {
-		logger.Error("HTTP server initialization failed", "error", err)
-		os.Exit(1)
 	}
 
 	logger.Info(

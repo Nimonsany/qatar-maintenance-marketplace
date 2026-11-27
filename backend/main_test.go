@@ -9,9 +9,15 @@ import (
 	"strings"
 	"testing"
 
+	"context"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
 	"qatar-maintenance/backend/internal/config"
 	"qatar-maintenance/backend/internal/logging"
 	serverpkg "qatar-maintenance/backend/internal/server"
+	"syscall"
 	"time"
 )
 
@@ -231,59 +237,50 @@ func TestIntegrationIgnoresClientID(t *testing.T) {
 	}
 }
 
-func TestLoadPort(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		want      int
-		wantError bool
-	}{
-		{"default", "", 8080, false},
-		{"custom", "9090", 9090, false},
-		{"minimum", "1024", 1024, false},
-		{"maximum", "65535", 65535, false},
-		{"non-numeric", "abc", 0, true},
-		{"too-small", "80", 0, true},
-		{"too-large", "65536", 0, true},
-		{"negative", "-1", 0, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := loadPort(tt.input)
-
-			if (err != nil) != tt.wantError {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if !tt.wantError && got != tt.want {
-				t.Errorf("expected %d, got %d", tt.want, got)
-			}
-		})
-	}
-}
-
 func TestServerConfiguration(t *testing.T) {
-	server := newServer(9090)
-
-	if server.Addr != "127.0.0.1:9090" {
-		t.Errorf("unexpected address: %s", server.Addr)
+	lookup := func(key string) (string, bool) {
+		if key == "QMM_PORT" {
+			return "9090", true
+		}
+		return "", false
 	}
 
-	if server.ReadHeaderTimeout != 5*time.Second {
-		t.Error("incorrect read header timeout")
+	var logs bytes.Buffer
+
+	_, srv, _, err := buildApplication(lookup, &logs)
+	if err != nil {
+		t.Fatalf("buildApplication() failed: %v", err)
 	}
 
-	if server.ReadTimeout != 10*time.Second {
-		t.Error("incorrect read timeout")
+	if srv == nil {
+		t.Fatal("expected non-nil HTTP server")
 	}
 
-	if server.WriteTimeout != 10*time.Second {
-		t.Error("incorrect write timeout")
+	if srv.Addr != "127.0.0.1:9090" {
+		t.Errorf(
+			"server address = %q, want 127.0.0.1:9090",
+			srv.Addr,
+		)
 	}
 
-	if server.IdleTimeout != 30*time.Second {
-		t.Error("incorrect idle timeout")
+	if srv.Handler == nil {
+		t.Error("HTTP handler must not be nil")
+	}
+
+	if srv.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("incorrect read header timeout: %v", srv.ReadHeaderTimeout)
+	}
+
+	if srv.ReadTimeout != 10*time.Second {
+		t.Errorf("incorrect read timeout: %v", srv.ReadTimeout)
+	}
+
+	if srv.WriteTimeout != 10*time.Second {
+		t.Errorf("incorrect write timeout: %v", srv.WriteTimeout)
+	}
+
+	if srv.IdleTimeout != 30*time.Second {
+		t.Errorf("incorrect idle timeout: %v", srv.IdleTimeout)
 	}
 }
 
@@ -406,5 +403,403 @@ func TestIntegratedConfigurationRejectsInvalidValues(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestBuildApplicationSuccess(t *testing.T) {
+	values := map[string]string{
+		"QMM_HOST":             "127.0.0.1",
+		"QMM_PORT":             "9090",
+		"QMM_LOG_LEVEL":        "DEBUG",
+		"QMM_SHUTDOWN_TIMEOUT": "10s",
+	}
+
+	lookup := func(key string) (string, bool) {
+		value, ok := values[key]
+		return value, ok
+	}
+
+	var logs bytes.Buffer
+
+	cfg, srv, logger, err := buildApplication(
+		lookup,
+		&logs,
+	)
+	if err != nil {
+		t.Fatalf("buildApplication() failed: %v", err)
+	}
+
+	if srv == nil {
+		t.Fatal("expected HTTP server")
+	}
+
+	if logger == nil {
+		t.Fatal("expected logger")
+	}
+
+	if cfg.Host != "127.0.0.1" {
+		t.Errorf("host = %q, want 127.0.0.1", cfg.Host)
+	}
+
+	if cfg.Port != 9090 {
+		t.Errorf("port = %d, want 9090", cfg.Port)
+	}
+
+	if cfg.LogLevel != "DEBUG" {
+		t.Errorf("log level = %q, want DEBUG", cfg.LogLevel)
+	}
+
+	if cfg.ShutdownTimeout != 10*time.Second {
+		t.Errorf("shutdown timeout = %v, want 10s", cfg.ShutdownTimeout)
+	}
+
+	if srv.Addr != "127.0.0.1:9090" {
+		t.Errorf("server address = %q, want 127.0.0.1:9090", srv.Addr)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", rec.Code)
+	}
+
+	if rec.Header().Get("X-Request-ID") == "" {
+		t.Error("missing server-generated request ID")
+	}
+
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("security header missing")
+	}
+
+	logger.Info("test startup")
+
+	var logEntry map[string]any
+	if err := json.Unmarshal(
+		bytes.TrimSpace(logs.Bytes()),
+		&logEntry,
+	); err != nil {
+		t.Fatalf("invalid JSON log: %v", err)
+	}
+
+	if logEntry["msg"] != "test startup" {
+		t.Errorf("unexpected log message: %v", logEntry["msg"])
+	}
+}
+
+func TestBuildApplicationInvalidConfiguration(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{"invalid host", "QMM_HOST", "0.0.0.0"},
+		{"invalid port", "QMM_PORT", "80"},
+		{"invalid log level", "QMM_LOG_LEVEL", "TRACE"},
+		{"invalid shutdown timeout", "QMM_SHUTDOWN_TIMEOUT", "31s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookup := func(key string) (string, bool) {
+				if key == tt.key {
+					return tt.value, true
+				}
+				return "", false
+			}
+
+			var logs bytes.Buffer
+
+			_, srv, logger, err := buildApplication(
+				lookup,
+				&logs,
+			)
+
+			if err == nil {
+				t.Fatal("expected configuration error")
+			}
+
+			if srv != nil {
+				t.Error("server should not be created")
+			}
+
+			if logger != nil {
+				t.Error("logger should not be created")
+			}
+		})
+	}
+}
+
+func TestBuildApplicationRejectsNilDependencies(t *testing.T) {
+	t.Run("nil lookup", func(t *testing.T) {
+		var logs bytes.Buffer
+
+		_, srv, logger, err := buildApplication(
+			nil,
+			&logs,
+		)
+
+		if err == nil {
+			t.Fatal("expected error for nil lookup")
+		}
+
+		if srv != nil || logger != nil {
+			t.Fatal("unexpected initialized components")
+		}
+	})
+
+	t.Run("nil log output", func(t *testing.T) {
+		lookup := func(string) (string, bool) {
+			return "", false
+		}
+
+		_, srv, logger, err := buildApplication(
+			lookup,
+			nil,
+		)
+
+		if err == nil {
+			t.Fatal("expected error for nil log output")
+		}
+
+		if srv != nil || logger != nil {
+			t.Fatal("unexpected initialized components")
+		}
+	})
+}
+
+func TestApplicationOccupiedPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("localhost listener unavailable: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find test executable: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer cancel()
+
+	cmd := exec.CommandContext(
+		ctx,
+		executable,
+		"-test.run=^TestApplicationSubprocessHelper$",
+	)
+
+	// Do not inherit conflicting QMM_* values from the parent.
+	var env []string
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "QMM_") {
+			continue
+		}
+		env = append(env, entry)
+	}
+
+	cmd.Env = append(
+		env,
+		"QMM_TEST_CHILD=1",
+		"QMM_HOST=127.0.0.1",
+		fmt.Sprintf("QMM_PORT=%d", port),
+		"QMM_LOG_LEVEL=INFO",
+		"QMM_SHUTDOWN_TIMEOUT=5s",
+	)
+
+	output, err := cmd.CombinedOutput()
+
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf(
+			"application did not exit after port conflict:\n%s",
+			output,
+		)
+	}
+
+	if err == nil {
+		t.Fatalf(
+			"expected non-zero exit on occupied port:\n%s",
+			output,
+		)
+	}
+
+	if !bytes.Contains(
+		output,
+		[]byte("address already in use"),
+	) {
+		t.Fatalf(
+			"expected address-in-use error, got:\n%s",
+			output,
+		)
+	}
+
+	if !bytes.Contains(
+		output,
+		[]byte(`"level":"ERROR"`),
+	) {
+		t.Fatalf(
+			"expected JSON error log, got:\n%s",
+			output,
+		)
+	}
+}
+
+func TestApplicationSubprocessHelper(t *testing.T) {
+	if os.Getenv("QMM_TEST_CHILD") != "1" {
+		return
+	}
+
+	main()
+}
+
+func TestApplicationSIGTERMGracefulShutdown(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("localhost listener unavailable: %v", err)
+	}
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release test port: %v", err)
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find test executable: %v", err)
+	}
+
+	cmd := exec.Command(
+		executable,
+		"-test.run=^TestApplicationSubprocessHelper$",
+	)
+
+	// Remove inherited QMM_* variables so the child has
+	// exactly the intended test configuration.
+	var env []string
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "QMM_") {
+			continue
+		}
+		env = append(env, entry)
+	}
+
+	cmd.Env = append(
+		env,
+		"QMM_TEST_CHILD=1",
+		"QMM_HOST=127.0.0.1",
+		fmt.Sprintf("QMM_PORT=%d", port),
+		"QMM_LOG_LEVEL=INFO",
+		"QMM_SHUTDOWN_TIMEOUT=5s",
+	)
+
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start subprocess: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	waitConsumed := false
+
+	defer func() {
+		if waitConsumed {
+			return
+		}
+
+		_ = cmd.Process.Kill()
+
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("subprocess cleanup timed out")
+		}
+	}()
+
+	client := &http.Client{
+		Timeout: 300 * time.Millisecond,
+	}
+	url := fmt.Sprintf(
+		"http://127.0.0.1:%d/health",
+		port,
+	)
+
+	deadline := time.Now().Add(5 * time.Second)
+	ready := false
+
+	for time.Now().Before(deadline) {
+		select {
+
+		case err := <-done:
+			waitConsumed = true
+			t.Fatalf(
+				"application exited before readiness: %v",
+				err,
+			)
+
+		default:
+		}
+
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				ready = true
+				break
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !ready {
+		t.Fatal("application did not become ready")
+	}
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		waitConsumed = true
+		if err != nil {
+			t.Fatalf(
+				"application exited with error: %v\n%s",
+				err,
+				output.String(),
+			)
+		}
+
+	case <-time.After(8 * time.Second):
+		t.Fatal("application did not shut down in time")
+	}
+
+	if !bytes.Contains(
+		output.Bytes(),
+		[]byte(`"msg":"application shutdown completed"`),
+	) {
+		t.Fatalf(
+			"graceful shutdown log missing:\n%s",
+			output.String(),
+		)
+	}
+
+	if !bytes.Contains(
+		output.Bytes(),
+		[]byte(`"level":"INFO"`),
+	) {
+		t.Fatal("expected structured INFO log")
 	}
 }
