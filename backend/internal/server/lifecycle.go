@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// Run starts the HTTP server and stops it when ctx is cancelled.
-// The supplied context should be controlled by the application.
+// Run serves HTTP until startup fails or ctx is cancelled.
+// Graceful shutdown waits for active requests up to shutdownTimeout.
+// On shutdown failure, Close forces active connections to close.
 func Run(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration) error {
 	if ctx == nil {
 		return fmt.Errorf("server context is required")
@@ -33,7 +34,6 @@ func Run(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration) e
 			return nil
 		}
 		return err
-
 	case <-ctx.Done():
 	}
 
@@ -43,15 +43,38 @@ func Run(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration) e
 	)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	shutdownErr := srv.Shutdown(shutdownCtx)
+
+	if shutdownErr != nil {
+		// Shutdown timed out or otherwise failed.
+		// Force-close open connections before returning.
 		closeErr := srv.Close()
+
+		// Always collect the listener result to avoid leaving
+		// the server goroutine unobserved.
+		serveErr := <-serverErr
+
+		result := fmt.Errorf(
+			"graceful shutdown failed: %w",
+			shutdownErr,
+		)
+
 		if closeErr != nil {
-			return errors.Join(
-				fmt.Errorf("graceful shutdown failed: %w", err),
+			result = errors.Join(
+				result,
 				fmt.Errorf("forced close failed: %w", closeErr),
 			)
 		}
-		return fmt.Errorf("graceful shutdown failed: %w", err)
+
+		if serveErr != nil &&
+			!errors.Is(serveErr, http.ErrServerClosed) {
+			result = errors.Join(
+				result,
+				fmt.Errorf("server stopped with error: %w", serveErr),
+			)
+		}
+
+		return result
 	}
 
 	if err := <-serverErr; err != nil &&
