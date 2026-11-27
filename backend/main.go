@@ -20,7 +20,6 @@ type healthResponse struct {
 }
 
 // loadPort validates the optional local development port.
-// An empty value uses port 8080.
 func loadPort(value string) (int, error) {
 	if value == "" {
 		return 8080, nil
@@ -36,12 +35,34 @@ func loadPort(value string) (int, error) {
 	return port, nil
 }
 
+// newHandler builds the API router with request middleware.
 func newHandler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+	// Match all methods explicitly, so we control the
+	// JSON error format for unsupported methods.
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+
+			// HEAD responses should not contain a body.
+			if r.Method == http.MethodHead {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+
+			writeAPIError(
+				w,
+				http.StatusMethodNotAllowed,
+				ErrorCodeMethodNotAllowed,
+				"HTTP method not allowed",
+				requestIDFromContext(r.Context()),
+			)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
 
 		response := healthResponse{
 			Status:  "ok",
@@ -53,7 +74,24 @@ func newHandler() http.Handler {
 		}
 	})
 
-	return mux
+	// Catch unmatched routes and return consistent JSON.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		writeAPIError(
+			w,
+			http.StatusNotFound,
+			ErrorCodeNotFound,
+			"Resource not found",
+			requestIDFromContext(r.Context()),
+		)
+	})
+
+	return requestMiddleware(mux)
 }
 
 func newServer(port int) *http.Server {
