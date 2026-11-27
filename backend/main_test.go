@@ -1,11 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
+
+	"qatar-maintenance/backend/internal/config"
+	"qatar-maintenance/backend/internal/logging"
+	serverpkg "qatar-maintenance/backend/internal/server"
 	"time"
 )
 
@@ -278,5 +284,127 @@ func TestServerConfiguration(t *testing.T) {
 
 	if server.IdleTimeout != 30*time.Second {
 		t.Error("incorrect idle timeout")
+	}
+}
+
+func TestIntegratedApplicationComponents(t *testing.T) {
+	values := map[string]string{
+		"QMM_HOST":             "127.0.0.1",
+		"QMM_PORT":             "9090",
+		"QMM_LOG_LEVEL":        "debug",
+		"QMM_SHUTDOWN_TIMEOUT": "10s",
+	}
+
+	lookup := func(key string) (string, bool) {
+		value, exists := values[key]
+		return value, exists
+	}
+
+	cfg, err := config.Load(lookup)
+	if err != nil {
+		t.Fatalf("config.Load() failed: %v", err)
+	}
+
+	if cfg.Port != 9090 {
+		t.Errorf("port = %d, want 9090", cfg.Port)
+	}
+
+	if cfg.LogLevel != "DEBUG" {
+		t.Errorf("log level = %q, want DEBUG", cfg.LogLevel)
+	}
+
+	if cfg.ShutdownTimeout != 10*time.Second {
+		t.Errorf("shutdown timeout = %v, want 10s", cfg.ShutdownTimeout)
+	}
+
+	var output bytes.Buffer
+
+	logger, err := logging.New(&output, cfg.LogLevel)
+	if err != nil {
+		t.Fatalf("logging.New() failed: %v", err)
+	}
+
+	srv, err := serverpkg.New(cfg, newHandler())
+	if err != nil {
+		t.Fatalf("server.New() failed: %v", err)
+	}
+
+	if srv.Addr != "127.0.0.1:9090" {
+		t.Errorf("address = %q, want 127.0.0.1:9090", srv.Addr)
+	}
+
+	logger.Info(
+		"application starting",
+		"service", "qatar-maintenance-api",
+		"address", srv.Addr,
+	)
+
+	var entry map[string]any
+
+	if err := json.Unmarshal(
+		bytes.TrimSpace(output.Bytes()), &entry,
+	); err != nil {
+		t.Fatalf("startup log is not valid JSON: %v", err)
+	}
+
+	if entry["level"] != "INFO" {
+		t.Errorf("log level = %v, want INFO", entry["level"])
+	}
+
+	if entry["msg"] != "application starting" {
+		t.Errorf("unexpected log message: %v", entry["msg"])
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	recorder := httptest.NewRecorder()
+
+	srv.Handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", recorder.Code)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"status":"ok"`) {
+		t.Errorf("unexpected health response: %s", recorder.Body.String())
+	}
+
+	if recorder.Header().Get("X-Request-ID") == "" {
+		t.Error("missing server-generated request ID")
+	}
+
+	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("security headers were not preserved")
+	}
+}
+
+func TestIntegratedConfigurationRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{"public host", "QMM_HOST", "0.0.0.0"},
+		{"invalid port", "QMM_PORT", "80"},
+		{"invalid log level", "QMM_LOG_LEVEL", "TRACE"},
+		{"invalid shutdown timeout", "QMM_SHUTDOWN_TIMEOUT", "31s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookup := func(key string) (string, bool) {
+				if key == tt.key {
+					return tt.value, true
+				}
+				return "", false
+			}
+
+			if _, err := config.Load(lookup); err == nil {
+				t.Errorf(
+					"configuration accepted %s=%q",
+					tt.key,
+					tt.value,
+				)
+			}
+		})
 	}
 }

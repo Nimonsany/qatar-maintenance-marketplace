@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"qatar-maintenance/backend/internal/config"
+	"qatar-maintenance/backend/internal/logging"
+	serverpkg "qatar-maintenance/backend/internal/server"
 	"strconv"
 	"syscall"
 	"time"
@@ -106,12 +108,27 @@ func newServer(port int) *http.Server {
 }
 
 func main() {
-	port, err := loadPort(os.Getenv("QMM_PORT"))
+	cfg, err := config.Load(os.LookupEnv)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	server := newServer(port)
+	logger, err := logging.New(os.Stderr, cfg.LogLevel)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	server, err := serverpkg.New(cfg, newHandler())
+	if err != nil {
+		logger.Error("HTTP server initialization failed", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info(
+		"application starting",
+		"service", "qatar-maintenance-api",
+		"address", server.Addr,
+	)
 
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
@@ -120,43 +137,21 @@ func main() {
 	)
 	defer stop()
 
-	serverErr := make(chan error, 1)
-
-	go func() {
-		serverErr <- server.ListenAndServe()
-	}()
-
-	select {
-	case err := <-serverErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal("server error: ", err)
-		}
-		return
-
-	case <-ctx.Done():
-		log.Println("Shutdown signal received")
+	if err := serverpkg.Run(
+		ctx,
+		server,
+		cfg.ShutdownTimeout,
+	); err != nil {
+		logger.Error(
+			"HTTP server stopped with error",
+			"error", err,
+		)
+		os.Exit(1)
 	}
 
-	stop()
-
-	shutdownCtx, cancel := context.WithTimeout(
-		context.Background(),
-		5*time.Second,
-	)
-	defer cancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("graceful shutdown failed: %v", err)
-
-		if closeErr := server.Close(); closeErr != nil {
-			log.Printf("forced close failed: %v", closeErr)
-		}
+	if ctx.Err() != nil {
+		logger.Info("application shutdown completed")
+	} else {
+		logger.Info("HTTP server stopped")
 	}
-
-	if err := <-serverErr; err != nil &&
-		!errors.Is(err, http.ErrServerClosed) {
-		log.Printf("server stopped with error: %v", err)
-	}
-
-	log.Println("Qatar Maintenance API stopped")
 }
