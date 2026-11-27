@@ -223,3 +223,50 @@ and before switching chats.
 
 The historical initial snapshot required refreshing
 as the project state changed.
+
+
+## 2026-11-27 — DEV-008 LATEST HANDOFF (CURRENT)
+
+This section supersedes old operational "current" instructions above;
+all prior sections are retained as historical evidence.
+
+### Identity and Environment
+- Project: Qatar Maintenance Hybrid Marketplace (Qatar first).
+- Private repository: Nimonsany/qatar-maintenance-marketplace.
+- Local path: /home/nimon/Projects/qatar-maintenance-marketplace.
+- Backend: Go, module qatar-maintenance/backend, declared Go 1.26.
+- Manual VS Code / terminal workflow; ChatGPT advises; owner runs commands.
+
+### Verified Technical and Git Progress
+- DEV-004F COMPLETE — a4b222e1aa01d4507c8d524861239c7d75769d8e.
+- DEV-005 COMPLETE — 4a0be0e8b198f9ec0f495df444c8fff6f588f475.
+- DEV-006 COMPLETE — 9b13814667e29009aed1150bcb5b1d3f4ad9b740.
+- DEV-007 COMPLETE — db8f2e16773c8f5bb3b3efbf49adcb3393548778.
+- DEV-007 test evidence: adapter tests, full regression, race, vet,
+  formatting and Git file-scope validation all PASS.
+- Last verified DEV-007 local HEAD and GitHub main SHA identical;
+  Git working tree clean immediately after milestone push.
+- Isolated apiadapter package is NOT registered in main HTTP router.
+
+### Current Approved Task — DEV-008
+- Documentation-only append reconciliation for PROJECT_MASTER.md,
+  PROJECT_STATE.md, DECISIONS.md, CHANGELOG.md and HANDOFF.md.
+- Preserve original project purpose, historical records, and DEC-001–005.
+- Verify exactly these five files changed; no backend modifications.
+- Separate explicit permission required for Git staging, commit and push.
+
+### Restrictions and Governance
+- Historical Phase 0.0 completion verified (11/11 continuity checks).
+- Original continuity documents lack a formal Phase 0.1 approval record;
+  governance reconciliation is UNRESOLVED. Do not invent it.
+- No new BUILD approval for DEV-009 or public API activation.
+- Do not enable production identity, real public marketplace requests,
+  Qatar-restricted worker operations, database migrations, payments/PSPs,
+  cloud deployment or infrastructure changes without explicit approvals.
+- Proposed stack/architecture does not imply approval of every component.
+
+### Next Exact Action
+Run the DEV-008 append-only script, inspect the five-file Git diff and
+run the read-only scope/history verification. Ask the owner for separate
+Git stage, commit and push approval. Only then update this handoff with
+verified new Git checkpoint evidence through a separately authorized change.

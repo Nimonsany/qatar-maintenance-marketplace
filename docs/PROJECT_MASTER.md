@@ -127,3 +127,43 @@ Not authorized:
 This addendum preserves the original project master record.
 Any binding change to architecture, business scope or
 approved development rules requires separate owner approval.
+
+
+## 2026-11-27 — DEV-008 Current Technical Status (Superseding Addendum)
+
+This section is the CURRENT checkpoint. Earlier dated statements about
+"DEV-004F PLAN MODE", "no application coding", or previous authorization
+were accurate only for their respective historical snapshots.
+They are not current operating instructions.
+
+### Verified Milestones and Git Checkpoints
+- DEV-004F: HTTP lifecycle reliability hardening — COMPLETE;
+  commit a4b222e1aa01d4507c8d524861239c7d75769d8e.
+- DEV-005: isolated marketplace domain and booking state machine — COMPLETE;
+  commit 4a0be0e8b198f9ec0f495df444c8fff6f588f475.
+- DEV-006: application services, repository and trusted-identity contracts — COMPLETE;
+  commit 9b13814667e29009aed1150bcb5b1d3f4ad9b740.
+- DEV-007: isolated, unregistered HTTP API adapter and contract tests — COMPLETE;
+  commit db8f2e16773c8f5bb3b3efbf49adcb3393548778.
+- At the DEV-007 checkpoint: local main and GitHub origin/main SHAs matched;
+  working tree was clean; backend regression, race tests, vet and formatting PASS.
+- Backend module declares Go 1.26.
+
+### Current Operational Boundaries
+- Implemented API adapter is NOT registered in the application router.
+- No live public marketplace booking or quotation endpoints are activated.
+- No production authentication, verified worker eligibility, database
+  migrations, PSP/payment activation, cloud deployment or infrastructure work.
+- PostgreSQL/PostGIS and technology proposals are not approved solely
+  because these Go foundations were implemented.
+- Phase 0.0 historical completion: verified; Phase 0.1 formal approval
+  evidence remains absent from the five original continuity records.
+  Phase 0.1 governance reconciliation: UNRESOLVED.
+- DEC-001 through DEC-005 remain unchanged and approved.
+
+### Current Authorization
+- DEV-008 documentation-only reconciliation of the five named Markdown
+  continuity files is approved; preserve all historical sections.
+- No backend code modifications or unrelated file modifications.
+- Git stage, commit and GitHub push require separate explicit authorization.
+- No new runtime feature or DEV-009 BUILD authorization is implied.

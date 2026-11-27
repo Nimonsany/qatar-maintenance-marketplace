@@ -141,3 +141,53 @@ Verify documentation changes, commit them to Git and push to the private GitHub 
 ### Next Action
 Verify the appended CHANGELOG.md entry, then continue
 with DECISIONS.md after successful review.
+
+
+## 2026-11-27 — DEV-004F through DEV-007 Verified Backend Checkpoints
+
+The following entries are added retrospectively from owner-provided
+terminal outputs and verified Git checkpoints. Earlier dated entries
+remain unchanged and describe their original historical context.
+
+### DEV-004F — Backend Lifecycle Reliability
+- Commit: a4b222e1aa01d4507c8d524861239c7d75769d8e.
+- Active-request shutdown, timeout and forced-close fallback tests;
+  full regression, race detector, vet and formatting: PASS.
+- Commit synchronized with origin/main at that milestone.
+
+### DEV-005 — Marketplace Domain Foundation
+- Commit: 4a0be0e8b198f9ec0f495df444c8fff6f588f475.
+- Added backend/internal/marketplace/marketplace.go and
+  backend/internal/marketplace/marketplace_test.go.
+- Tests, full regression, race detector, vet and formatting: PASS.
+- GitHub remote-tracking sync verified at that checkpoint.
+
+### DEV-006 — Application Service Layer
+- Commit: 9b13814667e29009aed1150bcb5b1d3f4ad9b740.
+- Added backend/internal/application/contracts.go,
+  backend/internal/application/service.go and
+  backend/internal/application/service_test.go.
+- Tests, full backend regression, race detector, vet, formatting: PASS.
+- GitHub main SHA directly verified equal to local HEAD.
+
+### DEV-007 — Isolated Secure API Adapter & Contract Tests
+- Commit: db8f2e16773c8f5bb3b3efbf49adcb3393548778.
+- Added backend/internal/apiadapter/adapter.go and
+  backend/internal/apiadapter/adapter_test.go.
+- Adapter tests, full regression, race detector, vet, formatting and
+  staged-diff whitespace checks: PASS.
+- Exact two-file commit verified; clean tree; GitHub main SHA matched.
+- Not registered into the running HTTP application router.
+
+### Governance and Safety
+- Phase 0.1 formal approval record remains unresolved.
+- No database migrations, live public marketplace endpoints, production
+  authentication, payment activation, cloud or infrastructure deployment.
+- DEC-001 through DEC-005 remain unchanged.
+
+## 2026-11-27 — DEV-008 Documentation Reconciliation (Uncommitted Work)
+
+- Owner approved an append-only update to five continuity Markdown files.
+- Previous historical content preserved; current-state addenda appended.
+- Verification and Git review must be performed locally before milestone
+  completion is claimed. No Git stage/commit/push authorization granted.
